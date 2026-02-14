@@ -4,8 +4,8 @@ Guidance for autonomous coding agents working in this repository.
 
 ## Scope
 
-- This is a Go service for `cars` CRUD backed by SQLite.
-- Architecture is layered: API handlers -> service -> repository/DB.
+- Go service for `cars` CRUD backed by SQLite.
+- Layered architecture: API handlers -> service -> repository/DB.
 - Keep edits minimal and consistent with existing patterns.
 
 ## Rule Files (Cursor/Copilot)
@@ -13,156 +13,165 @@ Guidance for autonomous coding agents working in this repository.
 - `.cursorrules`: not present.
 - `.cursor/rules/`: not present.
 - `.github/copilot-instructions.md`: not present.
-- If any of these appear later, treat them as higher-priority instructions.
+- If any appear later, treat them as higher-priority instructions.
 
 ## Project Layout
 
-- `cmd/server/main.go`: application entrypoint and dependency wiring.
-- `internal/api/`: HTTP handlers, routes, JSend response helpers.
-- `internal/service/`: validation and domain/business logic.
-- `internal/repository/`: repository interfaces + SQLite implementation.
-- `internal/models/`: domain structs.
-- `db/schema.sql`: SQLite schema (`inventory` + `cars`).
-- `api/openapi.yaml`: OpenAPI contract.
-- `tests/api_test.go`: integration tests against running server.
+```
+cmd/server/main.go           # Entrypoint and dependency wiring
+internal/api/                # HTTP handlers, routes, JSend responses
+internal/service/            # Validation and business logic
+internal/repository/         # Repository interfaces + SQLite impl
+internal/models/             # Domain structs
+db/schema.sql                # SQLite schema (inventory + cars tables)
+api/openapi.yaml             # OpenAPI contract
+tests/api_test.go            # Integration tests against running server
+```
 
 ## Build and Run
 
-- Install dependencies: `go mod tidy`
-- Build all packages: `go build ./...`
-- Build via make: `make build`
-- Run server directly:
-  - `go run ./cmd/server --addr :8080 --db-path cars.db --schema-path db/schema.sql`
-- Run server via make: `make run`
-- Optional binary flow:
-  - `go build -o bin/server ./cmd/server`
-  - `./bin/server --addr :8080 --db-path cars.db --schema-path db/schema.sql`
+```bash
+go mod tidy
+go build ./...
+go run ./cmd/server --addr :8080 --db-path cars.db --schema-path db/schema.sql
+```
 
-## Lint and Formatting
+### Make Targets (via Dagger)
 
-- Always run `gofmt` on changed Go files.
-- Example formatting command:
-  - `gofmt -w cmd/server/main.go internal/models/*.go internal/repository/*.go internal/service/*.go internal/api/*.go tests/*.go`
-- Vet the code: `go vet ./...`
-- Optional if installed: `staticcheck ./...`
-- Make targets available:
-  - `make fmt`
-  - `make vet`
+```bash
+make build    # dagger call build
+make test     # dagger call test
+make run      # dagger call run up --ports=8080:8080
+make fmt      # dagger call fmt export --path=.
+make vet      # dagger call vet
+```
 
 ## Test Commands
 
-- Recommended full test run in this environment:
-  - `CGO_ENABLED=0 go test ./...`
-  - `make test`
-- Run a single package:
-  - `CGO_ENABLED=0 go test ./internal/service -v`
-- Run a single test by exact name (important):
-  - `CGO_ENABLED=0 go test ./internal/service -run '^TestCarServiceUpdate$' -v`
-  - `make test-one PKG=./internal/service NAME='^TestCarServiceUpdate$'`
-- Run one API test:
-  - `CGO_ENABLED=0 go test ./internal/api -run '^TestCreateCarHandler$' -v`
-- Run one repository test:
-  - `CGO_ENABLED=0 go test ./internal/repository -run '^TestSQLiteCarRepositoryDelete$' -v`
-- Run integration test (server running locally):
-  - `RUN_API_TESTS=1 API_BASE_URL=http://localhost:8080 CGO_ENABLED=0 go test ./tests -run '^TestCarsAPI_CRUDAgainstRunningServer$' -v`
+### Full Suite
 
-## Environment Notes
+```bash
+CGO_ENABLED=0 go test ./...
+make test
+```
 
-- On some macOS setups, tests fail with `dyld: missing LC_UUID load command`.
-- Use `CGO_ENABLED=0` for test commands in this repo.
+### Single Test (use `^...$` for exact match)
+
+```bash
+CGO_ENABLED=0 go test ./internal/service -run '^TestCarServiceUpdate$' -v
+CGO_ENABLED=0 go test ./internal/api -run '^TestCreateCarHandler$' -v
+make test-one PKG=./internal/service NAME='^TestCarServiceUpdate$'
+```
+
+### Integration Tests
+
+```bash
+RUN_API_TESTS=1 API_BASE_URL=http://localhost:8080 CGO_ENABLED=0 go test ./tests -run '^TestCarsAPI_CRUDAgainstRunningServer$' -v
+```
+
+**Note:** Use `CGO_ENABLED=0` for all test commands (avoids macOS dyld issues).
+
+## Lint and Formatting
+
+```bash
+gofmt -w cmd/server/main.go internal/**/*.go tests/*.go
+go vet ./...
+```
+
+## Go Style Guidelines
+
+### Formatting
+
+- Rely on `gofmt`; do not hand-align code.
+- Keep functions small; prefer early returns.
+- Comments only where behavior is non-obvious.
+
+### Imports
+
+Order: standard library, blank line, internal module (`carsapi/...`), blank imports for drivers.
+
+```go
+import (
+    "context"
+    "database/sql"
+    "errors"
+
+    "carsapi/internal/models"
+
+    _ "modernc.org/sqlite"
+)
+```
+
+### Naming
+
+- Exported: `CamelCase` (e.g., `CarService`, `GetByID`)
+- Unexported: `camelCase` (e.g., `carService`, `validateCar`)
+- Acronyms: `ID`, `VIN`, `HTTP` (not `Id`, `Vin`, `Http`)
+- Interfaces: noun/verb + `er` (e.g., `CarRepository`)
+- Constructors: `NewX()` returns the interface type
+
+### Types
+
+- Entity IDs: `int64`; Year: `int`
+- Prefer `any` over `interface{}`
+- JSON tags: snake_case (e.g., `json:"inventory_id"`)
+
+## Error Handling
+
+- Do not ignore meaningful errors in production paths.
+- Use `errors.Is` for comparisons, not `==`.
+- Wrap with `%w`: `fmt.Errorf("%w: context", err)`
+- Map infrastructure errors (e.g., `sql.ErrNoRows`) to domain errors.
+- Keep client-facing messages stable; avoid leaking DB internals.
 
 ## Testing Guidelines
 
-- Use fakes for unit tests (no mocks/stubs in this codebase).
-- Fakes should be deterministic and simple (map-backed in-memory state).
-- Keep style aligned with current tests:
-  - helper constructors like `newFakeX()`
-  - direct named tests are acceptable
-  - assertions via `t.Fatalf(...)` with explicit expected values
-- Integration tests are gated by env var:
-  - set `RUN_API_TESTS=1`
-  - optional `API_BASE_URL` (default: `http://localhost:8080`)
+- Use fakes for unit tests (no mocks/stubs).
+- Fakes are map-backed, deterministic, simple.
+- Helper constructors: `newFakeCarRepository()`
+- Assertions via `t.Fatalf(...)` with explicit expected values.
+- Integration tests gated by: `RUN_API_TESTS=1`
 
 ## Architecture and DI Rules
 
-- Dependency flow must remain one-way:
-  - API layer depends on service interfaces.
-  - Service layer depends on repository interfaces.
-  - Repository layer depends on DB abstraction (`DB`, `Row`, `Rows`).
-- Wire concrete implementations in `cmd/server/main.go` only.
+- Dependency flow: API -> Service -> Repository -> DB (one-way).
+- Wire implementations only in `cmd/server/main.go`.
 - Prefer constructor injection (`NewX(...)`) over globals.
 - Do not bypass layers in production code.
 
 ## API Conventions
 
 - Use standard `net/http` (no framework).
-- Register routes in `internal/api/routes.go`.
-- JSend-like response format:
-  - success: `{"status":"success","data":...}`
-  - fail: `{"status":"fail","message":"..."}`
-  - error: `{"status":"error","message":"..."}`
-- Error/status mapping:
-  - validation errors -> `400` + `fail`
-  - not found -> `404` + `error`
-  - unexpected -> `500` + `error`
+- Routes in `internal/api/routes.go`.
+- JSend format:
+  - Success: `{"status":"success","data":...}`
+  - Fail: `{"status":"fail","message":"..."}` (client error)
+  - Error: `{"status":"error","message":"..."}` (server error)
+- Status mapping: validation -> 400/fail, not found -> 404/error, unexpected -> 500/error
 
 ## Service Layer Conventions
 
-- Service methods take `context.Context`.
-- Validate input before calling repository methods.
-- Keep domain sentinel errors stable:
-  - `ErrValidation`
-  - `ErrCarNotFound`
-- Wrap errors with `%w` when adding context.
-- Map infrastructure errors (for example `sql.ErrNoRows`) to domain errors.
+- Methods take `context.Context` first.
+- Validate input before calling repository.
+- Sentinel errors: `ErrValidation`, `ErrCarNotFound` (in `internal/service/errors.go`)
 
 ## Repository / SQL Conventions
 
-- Keep SQL queries in named `const` blocks near usage.
-- Use parameterized SQL (`?`) exclusively.
-- Never concatenate user input into SQL strings.
-- For update/delete, check `RowsAffected()` and map zero rows to `sql.ErrNoRows`.
-- Always `defer rows.Close()` and check `rows.Err()` after iteration.
-
-## Go Style Guidelines
-
-- Formatting: rely on `gofmt`, do not hand-align code.
-- Imports order:
-  - standard library
-  - blank line
-  - internal module imports (`carsapi/...`)
-  - blank imports only where required (driver registration)
-- Naming:
-  - exported: `CamelCase`
-  - unexported: `camelCase`
-  - acronyms: `ID`, `VIN`, `HTTP`
-- Types:
-  - entity IDs are `int64`
-  - `year` is `int`
-  - prefer `any` over `interface{}`
-- JSON tags should use snake_case (for example `inventory_id`).
-- Keep functions small; prefer early returns.
-- Add comments only where behavior is non-obvious.
-
-## Error Handling
-
-- Do not ignore meaningful errors in production paths.
-- If an error is intentionally ignored, make it explicit and minimal.
-- Use `errors.Is` for comparisons.
-- Keep client-facing messages stable and actionable.
-- Avoid leaking DB internals in API responses.
+- SQL queries in named `const` blocks near usage.
+- Parameterized SQL (`?`) only; never concatenate user input.
+- Check `RowsAffected()` for update/delete; map zero to `sql.ErrNoRows`.
+- Always `defer rows.Close()` and check `rows.Err()`.
 
 ## Schema and Contract Rules
 
-- Keep the `inventory` table in schema for FK integrity.
-- Do not add inventory API endpoints unless explicitly requested.
-- Preserve FK behavior (`PRAGMA foreign_keys = ON`).
-- Any API shape change must update `api/openapi.yaml`.
+- Keep `inventory` table for FK integrity; no inventory endpoints.
+- Preserve FK: `PRAGMA foreign_keys = ON`.
+- API shape changes must update `api/openapi.yaml`.
 
 ## Change Checklist
 
-- Update only the necessary layer(s).
-- Add or adjust unit tests with fakes for changed behavior.
-- Run `gofmt`, then relevant tests.
-- Run full suite when feasible: `make test`.
-- Update OpenAPI when request/response contracts change.
+1. Update only the necessary layer(s).
+2. Add/adjust unit tests with fakes.
+3. Run `gofmt`, then relevant tests.
+4. Run full suite: `make test` or `CGO_ENABLED=0 go test ./...`
+5. Update OpenAPI for contract changes.
